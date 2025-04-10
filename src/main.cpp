@@ -21,6 +21,8 @@ BTS7960 fanController(D_OUT_ENABLE_FAN, PWM_OUT_LPWM, PWM_OUT_RPWM);
 SimpleCLI cli;
 Command cmdSpeed;
 Command cmdDirection;
+Command cmdSimulate;
+bool simulating;
 
 unsigned loopDelta = 0;
 unsigned long lastMillis = 0;
@@ -28,10 +30,20 @@ unsigned long lastMillis = 0;
 void turn(BTS7960::Direction direction, uint8_t speed)
 {
     fanController.Turn(direction, speed);
-    Serial.print("Direction: ");
+    /*Serial.print("Direction: ");
     Serial.print((int) fanController.getDirection());
     Serial.print(" Speed: ");
-    Serial.println(fanController.getPwmValue());
+    Serial.print(fanController.getPwmValue());
+    Serial.print(" Simulate: ");
+    Serial.println(simulating);*/
+}
+void statusinfo(){
+    Serial.print(" Direction: ");
+    Serial.print((int) fanController.getDirection());
+    Serial.print(" Speed: ");
+    Serial.print(fanController.getPwmValue());
+    Serial.print(" Simulate: ");
+    Serial.println(simulating);
 }
 
 void wifi_setup()
@@ -56,7 +68,7 @@ void wifi_setup()
     bool res;
     Serial.println("AutoConnect");
     res = wm.autoConnect(configApSSID.c_str(), configApPW.c_str()); // password protected ap
-    
+    //res = wm.autoConnect("RATATATATA", "12345678");
     // reset settings - wipe stored credentials for testing
     // these are stored by the esp library
     // wm.resetSettings();
@@ -75,6 +87,7 @@ void wifi_setup()
         //if you get here you have connected to the WiFi    
         Serial.println("connected...yeey :)");
     }
+    Serial.println();
 }
 
 void cliErrorCallback(cmd_error* errorPtr) {
@@ -119,6 +132,21 @@ void cliDirectionCallback(cmd* cmdPtr) {
     }
 }
 
+void cliSimulationCallback(cmd* cmdPtr) {
+    Command cmd(cmdPtr);
+
+    Argument argSimulation   = cmd.getArgument("value");
+    if(argSimulation.isSet())
+    {
+        String simulateString = argSimulation.getValue();
+        int simulate          = simulateString.toInt(); 
+        if(simulate >= 0 && simulate < 2)
+        {
+            simulating = simulate;
+        }
+    }
+}
+
 void cli_loop()
 {
     if (Serial.available())
@@ -137,13 +165,18 @@ void cli_setup()
 
     cmdDirection = cli.addCmd("d/irection", cliDirectionCallback);
     cmdDirection.addPosArg("value");
+
+    cmdSimulate = cli.addCmd("s/imulate", cliSimulationCallback);
+    cmdSimulate.addPosArg("value");
   
     cli.setOnError(cliErrorCallback);
+
 }
 
 void oscReply(const String &remoteAddress)
 {
-    Serial.println(remoteAddress);
+    Serial.print(remoteAddress);
+    statusinfo();
     OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/speed/state", (int)fanController.getPwmValue());
     OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/direction/state", (int)fanController.getDirection());
 }
@@ -173,11 +206,24 @@ void oscDirectionCallback(const OscMessage& m)
         oscReply(m.remoteIP());
     }
 }
+void oscSimulationCallback(const OscMessage& m)
+{
+    if(m.isInt32(0))
+    {
+        int val = m.arg<int>(0);
+        if(val >= 0 && val < 2)
+        {
+            simulating = val;
+        }
+        oscReply(m.remoteIP());
+    }
+}
 
 void osc_setup()
 {
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/speed/set", oscSpeedCallback);
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/direction/set", oscDirectionCallback);
+    OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/simulate/set", oscSimulationCallback);
 }
 
 void setup() {
