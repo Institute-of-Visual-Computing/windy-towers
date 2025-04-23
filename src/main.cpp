@@ -23,6 +23,7 @@ Command cmdSpeed;
 Command cmdDirection;
 Command cmdSimulate;
 bool simulating;
+int counter = 0;
 
 unsigned loopDelta = 0;
 unsigned long lastMillis = 0;
@@ -250,6 +251,12 @@ void setup() {
     lastMillis = millis();
 }
 
+float sinusCurveforSimulating(float y){
+    float x;
+    x = sin(y)/6 + sin(y*2)/8 + sin(y*5)/3 + sin(y*3)/5 + sin(y*9)/4 * (sin(y*7)/2);
+    return x;
+}
+
 void loop() {
     loopDelta = millis() - lastMillis;
     lastMillis = millis();
@@ -258,5 +265,32 @@ void loop() {
     #ifdef USE_WIFI
         OscWiFi.update();
     #endif
-    delay(100);
+    if (simulating)
+    {
+        float result;
+        float adjusted;
+        ++counter;
+        adjusted = counter%((int)(PI*200));
+        if (adjusted != 0){
+            adjusted = adjusted/100;
+        }
+        result = sinusCurveforSimulating(adjusted);
+        turn((BTS7960::Direction)1, result+1*(255/2));
+        //fanController.Turn((BTS7960::Direction)1, 163);
+        statusinfo();
+        Serial.print(" SineCurveCounter: ");
+        Serial.print(counter);
+        Serial.print(" SineCurveAdjust: ");
+        Serial.print(adjusted);
+        Serial.print(" SineCurveResult: ");
+        Serial.println(result);
+        delay(250);
+    }
+    else
+    {
+        delay(100);
+    }
+    
+   
+    
 }
