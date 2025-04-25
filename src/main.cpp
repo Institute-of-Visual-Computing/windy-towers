@@ -22,7 +22,7 @@ SimpleCLI cli;
 Command cmdSpeed;
 Command cmdDirection;
 Command cmdSimulate;
-bool simulating;
+bool simulating = true;
 int counter = 0;
 
 unsigned loopDelta = 0;
@@ -253,7 +253,7 @@ void setup() {
 
 float sinusCurveforSimulating(float y){
     float x;
-    x = sin(y)/6 + sin(y*2)/8 + sin(y*5)/3 + sin(y*3)/5 + sin(y*9)/4 * (sin(y*7)/2);
+    x = sin(y*20)/16 + sin(y*25+PI)/20 + sin(y*28+PI)/20 + sin(y*39)/20 * sin(y*20)/2 * (sin(y*20)/1) * 5+0.5;
     return x;
 }
 
@@ -269,21 +269,31 @@ void loop() {
     {
         float result;
         float adjusted;
+        float remap;
         ++counter;
         adjusted = counter%((int)(PI*200));
         if (adjusted != 0){
             adjusted = adjusted/100;
         }
         result = sinusCurveforSimulating(adjusted);
-        turn((BTS7960::Direction)1, result+1*(255/2));
+        if(result < 0.5){
+            result = 0.5;
+        }
+        result = result*100;
+        
+        remap = map(result, 50,70,0,255);
+        turn((BTS7960::Direction)1, remap);
         //fanController.Turn((BTS7960::Direction)1, 163);
         statusinfo();
-        Serial.print(" SineCurveCounter: ");
+        /*Serial.print(" SineCurveCounter: ");
         Serial.print(counter);
         Serial.print(" SineCurveAdjust: ");
         Serial.print(adjusted);
         Serial.print(" SineCurveResult: ");
-        Serial.println(result);
+        Serial.print(result);
+        Serial.print(" SineCurveRemap: ");
+        Serial.println(remap);*/
+
         delay(250);
     }
     else
