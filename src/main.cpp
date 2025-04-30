@@ -22,8 +22,12 @@ SimpleCLI cli;
 Command cmdSpeed;
 Command cmdDirection;
 Command cmdSimulate;
+Command cmdstopFans;
 bool simulating = true;
+bool stopFans = true;
 int counter = 0;
+unsigned long lastMessage = 0;
+unsigned long lastResponse = 0;
 
 unsigned loopDelta = 0;
 unsigned long lastMillis = 0;
@@ -44,7 +48,9 @@ void statusinfo(){
     Serial.print(" Speed: ");
     Serial.print(fanController.getPwmValue());
     Serial.print(" Simulate: ");
-    Serial.println(simulating);
+    Serial.print(simulating);
+    Serial.print(" Stop Fans: ");
+    Serial.println(stopFans);
 }
 
 void wifi_setup()
@@ -147,6 +153,20 @@ void cliSimulationCallback(cmd* cmdPtr) {
         }
     }
 }
+void clistopFansCallback(cmd* cmdPtr) {
+    Command cmd(cmdPtr);
+
+    Argument argSimulation   = cmd.getArgument("value");
+    if(argSimulation.isSet())
+    {
+        String stopFansString = argSimulation.getValue();
+        int fanStop          = stopFansString.toInt(); 
+        if(fanStop >= 0 && fanStop < 2)
+        {
+            stopFans = fanStop;
+        }
+    }
+}
 
 void cli_loop()
 {
@@ -169,6 +189,9 @@ void cli_setup()
 
     cmdSimulate = cli.addCmd("s/imulate", cliSimulationCallback);
     cmdSimulate.addPosArg("value");
+
+    cmdstopFans = cli.addCmd("s/topFans", clistopFansCallback);
+    cmdstopFans.addPosArg("value");
   
     cli.setOnError(cliErrorCallback);
 
@@ -178,6 +201,7 @@ void oscReply(const String &remoteAddress)
 {
     Serial.print(remoteAddress);
     statusinfo();
+    lastMessage = millis();
     OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/speed/state", (int)fanController.getPwmValue());
     OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/direction/state", (int)fanController.getDirection());
 }
@@ -219,12 +243,25 @@ void oscSimulationCallback(const OscMessage& m)
         oscReply(m.remoteIP());
     }
 }
+void oscStopFansCallback(const OscMessage& m)
+{
+    if(m.isInt32(0))
+    {
+        int val = m.arg<int>(0);
+        if(val >= 0 && val < 2)
+        {
+            stopFans = val;
+        }
+        oscReply(m.remoteIP());
+    }
+}
 
 void osc_setup()
 {
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/speed/set", oscSpeedCallback);
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/direction/set", oscDirectionCallback);
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/simulate/set", oscSimulationCallback);
+    OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/stopFans/set", oscStopFansCallback);
 }
 
 void setup() {
@@ -249,6 +286,7 @@ void setup() {
     #endif
     Serial.println("Setup done");
     lastMillis = millis();
+    lastResponse = millis();
 }
 
 float sinusCurveforSimulating(float y){
@@ -256,16 +294,24 @@ float sinusCurveforSimulating(float y){
     x = sin(y*20)/16 + sin(y*25+PI)/20 + sin(y*28+PI)/20 + sin(y*39)/20 * sin(y*20)/2 * (sin(y*20)/1) * 5+0.5;
     return x;
 }
-
-void loop() {
-    loopDelta = millis() - lastMillis;
-    lastMillis = millis();
-    drd->loop();
-    cli_loop();
-    #ifdef USE_WIFI
-        OscWiFi.update();
-    #endif
-    if (simulating)
+void checkLastResponse(){
+    if(lastMessage < (millis()-4000)){
+        simulating = true;
+        stopFans = false;
+        lastResponse = lastMessage;
+        /*Serial.print(lastResponse);
+        Serial.print(" last respones::last message ");
+        Serial.print(lastMessage); */
+    }
+}
+void checkstopFans(){
+    if(stopFans){
+        turn((BTS7960::Direction)1, 0);
+    }
+    
+}
+void checkSimulating(){
+    if (simulating && !stopFans)
     {
         float result;
         float adjusted;
@@ -294,13 +340,20 @@ void loop() {
         Serial.print(" SineCurveRemap: ");
         Serial.println(remap);*/
 
-        delay(250);
+        delay(150);                             // plus the 100 delay from loop = 250 aka 0.25s
     }
-    else
-    {
-        delay(100);
-    }
-    
-   
-    
+}
+
+void loop() {
+    loopDelta = millis() - lastMillis;
+    lastMillis = millis();
+    drd->loop();
+    cli_loop();
+    #ifdef USE_WIFI
+        OscWiFi.update();
+    #endif
+    checkLastResponse();
+    checkSimulating();
+    checkstopFans();
+    delay(100);
 }
