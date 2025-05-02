@@ -202,8 +202,9 @@ void oscReply(const String &remoteAddress)
     Serial.print(remoteAddress);
     statusinfo();
     lastMessage = millis();
-    OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/speed/state", (int)fanController.getPwmValue());
-    OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/direction/state", (int)fanController.getDirection());
+    //OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/speed/state", (int)fanController.getPwmValue());
+    //OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/direction/state", (int)fanController.getDirection());
+    OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/connected/state", true);
 }
 
 void oscSpeedCallback(const OscMessage& m)
