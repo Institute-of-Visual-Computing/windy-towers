@@ -9,7 +9,10 @@
 
 #include "BTS7960.h"
 
-#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
+//#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
+
+#include <WiFi.h>           // Core Wi-Fi functions for ESP32
+#include <WiFiClient.h>     // Optional: if you use WiFiClient or HTTP libraries
 
 #include <ArduinoOSCWiFi.h>
 
@@ -29,12 +32,21 @@ Command cmdSimulate;
 Command cmdstopFans;
 bool simulating = true;
 bool stopFans = true;
+bool usingwifi = false;
+bool usingbt = true;
 int counter = 0;
 unsigned long WifilastMessage = 0;
 unsigned long lastResponse = 0;
 
 unsigned loopDelta = 0;
 unsigned long lastMillis = 0;
+
+char ssidBuffer[33] = "C61/C58_VR Access";      // Default SSID
+char passwordBuffer[65] = "dullard198462!Mk1";  // Default password
+
+char* DEFAULT_AP_SSID = ssidBuffer;
+char* DEFAULT_AP_PASSWORD = passwordBuffer;
+
 
 void turn(BTS7960::Direction direction, uint8_t speed)
 {
@@ -47,6 +59,7 @@ void turn(BTS7960::Direction direction, uint8_t speed)
     Serial.println(simulating);*/
 }
 void statusinfo(){
+    
     Serial.print(" Direction: ");
     Serial.print((int) fanController.getDirection());
     Serial.print(" Speed: ");
@@ -57,47 +70,58 @@ void statusinfo(){
     Serial.println(stopFans);
 }
 
-void wifi_setup()
-{
-    // WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-    // it is a good practice to make sure your code sets wifi mode how you want it.
-
-    // put your setup code here, to run once:
-    
-    // pinMode(BTN_WIFI_RESET, INPUT_PULLUP);
+void wifi_setup() {
     delay(100);
-    int countDown = 10 * 1000;
-    //WiFiManager, Local intialization. Once its business is done, there is no need to keep it around
-    WiFiManager wm;
-    wm.setHostname(hostName.c_str());
-    if(DRD_Detected)
-    {
-        wm.resetSettings();
+
+    Serial.println("WiFi Setup");
+
+    // Handle DRD: reset WiFi credentials if a double reset was detected
+    if (DRD_Detected) {
+        Serial.println("Double reset detected: clearing WiFi settings");
+        WiFi.disconnect(true); // Clear saved credentials
         delay(100);
     }
 
-    bool res;
-    Serial.println("AutoConnect");
-    res = wm.autoConnect(configApSSID.c_str(), configApPW.c_str()); // password protected ap
-    //res = wm.autoConnect("RATATATATA", "12345678");
-    // reset settings - wipe stored credentials for testing
-    // these are stored by the esp library
-    // wm.resetSettings();
+    // Use STA mode only (disable AP mode)
+    WiFi.mode(WIFI_STA);
 
-    // Automatically connect using saved credentials,
-    // if connection fails, it starts an access point with the specified name ( "AutoConnectAP"),
-    // if empty will auto generate SSID, if password is blank it will be anonymous AP (wm.autoConnect())
-    // then goes into a blocking loop awaiting configuration and will return success result
+    // Set hostname (optional)
+    WiFi.setHostname(hostName.c_str());
 
+    Serial.print("Connecting to SSID: ");
+    Serial.println(DEFAULT_AP_SSID);
 
-    if(!res) {
-        Serial.println("Failed to connect");
-        // ESP.restart();
-    } 
-    else {
-        //if you get here you have connected to the WiFi    
-        Serial.println("connected...yeey :)");
+    // Start connection
+    WiFi.begin(DEFAULT_AP_SSID, DEFAULT_AP_PASSWORD);
+
+    // Wait up to 10 seconds for connection
+    int attempts = 0;
+    const int maxAttempts = 100; // 100 x 100ms = 10 seconds
+    while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
+        delay(100);
+        Serial.print(".");
+        attempts++;
     }
+
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.print("Connected to WiFi. IP address: ");
+        Serial.println(WiFi.localIP());
+    } else {
+        /*
+        Serial.println("Failed to connect to WiFi. Starting AP mode...");
+
+        // Start Access Point to allow manual connection or configuration
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(DEFAULT_AP_SSID, DEFAULT_AP_PASSWORD);
+
+        Serial.print("AP Mode started. SSID: ");
+        Serial.println(DEFAULT_AP_SSID);
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.softAPIP());*/
+    }
+
     Serial.println();
 }
 
@@ -204,6 +228,8 @@ void cli_setup()
 void oscReply(const String &remoteAddress)
 {
     Serial.print(remoteAddress);
+    Serial.println(" Reply");
+    usingwifi = true;
     statusinfo();
     WifilastMessage = millis();
     //OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/speed/state", (int)fanController.getPwmValue());
@@ -317,42 +343,82 @@ class BTCallbacks : public BLECharacteristicCallbacks
 {
 }
 
-void onWrite(BLECharacteristic* pCharacteristic)
-{
+void onWrite(BLECharacteristic* pCharacteristic) {
     std::string value = pCharacteristic->getValue();
     int len = value.length();
-
-    if (len == 16)  // 4 ints x 4 bytes each
-    {
-        BTlastMessage = millis();
-        const uint8_t* data = (const uint8_t*)value.data();
-
-        int BTspeed;
-        int BTdirection;
-        memcpy(&BTspeed, &data[0], 4);
-        memcpy(&stopFans, &data[4], 4);
-        memcpy(&BTdirection, &data[8], 4);
-        memcpy(&simulating, &data[12], 4);
-        if(BTspeed >= 0 && BTspeed < 256)
-        {
-            turn(fanController.getDirection(), BTspeed);
-        }  
-        if(BTdirection >= 0 && BTdirection < 3)
-        {
-            turn((BTS7960::Direction)BTdirection, fanController.getPwmValue());
-        }
-    
-        /*
-        // Do something with the values
-        Serial.print("Speed: "); Serial.println(a);
-        Serial.print("FanStop: "); Serial.println(b);
-        Serial.print("Direction: "); Serial.println(c);
-        Serial.print("Simulating: "); Serial.println(d);
-        */
+    if (len == 0) {
+        Serial.println("Empty BLE message");
+        return;
     }
-    else
-    {
-        Serial.println("Invalid data length.");
+
+    const uint8_t* data = (const uint8_t*)value.data();
+    uint8_t commandType = data[0];
+
+    switch (commandType) {
+        case 0x01: { // Control message: speed, direction, etc.
+            BTlastMessage = millis();
+            Serial.println("Recieved fancontrol message");
+            if (len != 17) { // 1 byte for type + 4 x 4-byte ints = 17
+                Serial.println("Invalid control message length.");
+                return;
+            }
+
+            int BTspeed, BTdirection;
+            memcpy(&BTspeed, &data[1], 4);
+            memcpy(&stopFans, &data[5], 4);
+            memcpy(&BTdirection, &data[9], 4);
+            memcpy(&simulating, &data[13], 4);
+
+            if (BTspeed >= 0 && BTspeed < 256) {
+                turn(fanController.getDirection(), BTspeed);
+            }
+            if (BTdirection >= 0 && BTdirection < 3) {
+                turn((BTS7960::Direction)BTdirection, fanController.getPwmValue());
+            }
+            break;
+        }
+
+        case 0x02: { // Wi-Fi credentials message
+            BTlastMessage = millis();
+            Serial.println("Recieved WifiData message");
+            if (len < 4) {
+                Serial.println("Wi-Fi data too short");
+                return;
+            }
+
+            int offset = 1;
+            uint8_t ssidLen = data[offset++];
+            if (ssidLen > 32 || offset + ssidLen >= len) {
+                Serial.println("Invalid SSID length");
+                return;
+            }
+
+            memcpy(ssidBuffer, data + offset, ssidLen);
+            ssidBuffer[ssidLen] = '\0';  // Null-terminate
+            offset += ssidLen;
+
+            uint8_t passLen = data[offset++];
+            if (passLen > 64 || offset + passLen > len) {
+                Serial.println("Invalid password length");
+                return;
+            }
+
+            memcpy(passwordBuffer, data + offset, passLen);
+            passwordBuffer[passLen] = '\0';  // Null-terminate
+            
+            Serial.print("Received SSID: ");
+            Serial.println(DEFAULT_AP_SSID);
+            Serial.print("Received Password: ");
+            Serial.println(DEFAULT_AP_PASSWORD);
+            WiFi.disconnect(true); // Clear saved credentials
+            wifi_setup();
+            break;
+        }
+
+
+        default:
+            Serial.println("Unknown command type");
+            break;
     }
 }
 };
@@ -383,7 +449,7 @@ void BluetoothStopAdvertising()
 
 void BTsetup()
 {
-    Serial.begin(9600);
+    Serial.begin(115200);
 
     // led turned on/off from the iPhone app
     pinMode(led, OUTPUT);
@@ -392,6 +458,7 @@ void BTsetup()
     pinMode(button, INPUT);
 
     BLEDevice::init("ledbtn");
+    Serial.println("init ledbtn");
     // BLEDevice::setCustomGattsHandler(my_gatts_event_handler);
     // BLEDevice::setCustomGattcHandler(my_gattc_event_handler);
 
@@ -476,11 +543,12 @@ void setup() {
     //pinMode(A_IN_RPWM, INPUT_PULLDOWN);
     Serial.println("I am " + hostName);
     cli_setup();
+    BTsetup();
     #ifdef USE_WIFI
       wifi_setup();
       osc_setup();
     #endif
-    BTsetup();
+    
     Serial.println("Setup done");
     lastMillis = millis();
     lastResponse = millis();
@@ -531,7 +599,7 @@ void checkSimulating(){
         remap = map(result, 50,70,0,255);
         turn((BTS7960::Direction)1, remap);
         //fanController.Turn((BTS7960::Direction)1, 163);
-        statusinfo();
+       
         /*Serial.print(" SineCurveCounter: ");
         Serial.print(counter);
         Serial.print(" SineCurveAdjust: ");
@@ -542,6 +610,7 @@ void checkSimulating(){
         Serial.println(remap);*/
 
         delay(150);                             // plus the 100 delay from loop = 250 aka 0.25s
+        statusinfo();
     }
 }
 
@@ -550,12 +619,16 @@ void loop() {
     lastMillis = millis();
     drd->loop();
     cli_loop();
-    BTloop();
+    if(!usingwifi){
+        BTloop();
+    }
+    
     #ifdef USE_WIFI
         OscWiFi.update();
     #endif
+    
     checkLastResponse();
     checkSimulating();
     checkstopFans();
-    delay(100);
+    delay(10);
 }
