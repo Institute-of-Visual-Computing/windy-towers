@@ -41,11 +41,14 @@ unsigned long lastResponse = 0;
 unsigned loopDelta = 0;
 unsigned long lastMillis = 0;
 
-char ssidBuffer[33] = "C61/C58_VR Access";      // Default SSID
-char passwordBuffer[65] = "dullard198462!Mk1";  // Default password
+char ssidBuffer[33] = "TP-Link_41F2";      // Default SSID
+char passwordBuffer[65] = "46311467";  // Default password
 
 char* DEFAULT_AP_SSID = ssidBuffer;
 char* DEFAULT_AP_PASSWORD = passwordBuffer;
+
+uint16_t connectedClientId = 0;
+std::function<void()> reconnectCallback;
 
 
 void turn(BTS7960::Direction direction, uint8_t speed)
@@ -68,6 +71,7 @@ void statusinfo(){
     Serial.print(simulating);
     Serial.print(" Stop Fans: ");
     Serial.println(stopFans);
+    
 }
 
 void wifi_setup() {
@@ -96,7 +100,7 @@ void wifi_setup() {
 
     // Wait up to 10 seconds for connection
     int attempts = 0;
-    const int maxAttempts = 100; // 100 x 100ms = 10 seconds
+    const int maxAttempts = 200; // 100 x 100ms = 10 seconds
     while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
         delay(100);
         Serial.print(".");
@@ -357,7 +361,7 @@ void onWrite(BLECharacteristic* pCharacteristic) {
     switch (commandType) {
         case 0x01: { // Control message: speed, direction, etc.
             BTlastMessage = millis();
-            Serial.println("Recieved fancontrol message");
+            //Serial.println("Recieved fancontrol message");
             if (len != 17) { // 1 byte for type + 4 x 4-byte ints = 17
                 Serial.println("Invalid control message length.");
                 return;
@@ -375,6 +379,7 @@ void onWrite(BLECharacteristic* pCharacteristic) {
             if (BTdirection >= 0 && BTdirection < 3) {
                 turn((BTS7960::Direction)BTdirection, fanController.getPwmValue());
             }
+            statusinfo();
             break;
         }
 
@@ -412,6 +417,21 @@ void onWrite(BLECharacteristic* pCharacteristic) {
             Serial.println(DEFAULT_AP_PASSWORD);
             WiFi.disconnect(true); // Clear saved credentials
             wifi_setup();
+            break;
+        }
+        case 0x03: { // Wi-Fi credentials message
+            BTlastMessage = millis();
+            Serial.println("Recieved Disconnnect message");
+
+            uint8_t dc = data[1];
+            if(dc == 0x01){
+                WiFi.disconnect(true); // Clear saved credentials
+                pServer->disconnect(connectedClientId);
+                Serial.println("Disconnected!");
+                reconnectCallback();                //calls BTsetup TODO
+            }
+            
+            
             break;
         }
 
@@ -528,6 +548,7 @@ void BTloop()
 ////////////////////////////////////////////////////////////////////////////////////General/////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
+    reconnectCallback = BTsetup;
     Serial.begin(9600);
 
     drd = new DoubleResetDetector(DRD_TIMEOUT, DRD_ADDRESS);
@@ -630,5 +651,5 @@ void loop() {
     checkLastResponse();
     checkSimulating();
     checkstopFans();
-    delay(10);
+    delay(100);
 }
