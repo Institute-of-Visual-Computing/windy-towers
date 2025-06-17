@@ -30,8 +30,11 @@ Command cmdSpeed;
 Command cmdDirection;
 Command cmdSimulate;
 Command cmdstopFans;
-bool simulating = true;
-bool stopFans = true;
+int _speed = 0;
+int _direction = 0;
+bool _simulating = true;
+bool _stopFans = true;
+bool _autoFans = true;
 bool usingwifi = false;
 bool usingbt = true;
 int counter = 0;
@@ -48,7 +51,6 @@ char* DEFAULT_AP_SSID = ssidBuffer;
 char* DEFAULT_AP_PASSWORD = passwordBuffer;
 
 uint16_t connectedClientId = 0;
-std::function<void()> reconnectCallback;
 
 
 void turn(BTS7960::Direction direction, uint8_t speed)
@@ -64,13 +66,19 @@ void turn(BTS7960::Direction direction, uint8_t speed)
 void statusinfo(){
     
     Serial.print(" Direction: ");
-    Serial.print((int) fanController.getDirection());
+    //Serial.print((int) fanController.getDirection());
+    Serial.print(_direction);
     Serial.print(" Speed: ");
-    Serial.print(fanController.getPwmValue());
+    //Serial.print(fanController.getPwmValue());
+    Serial.print(_speed);
     Serial.print(" Simulate: ");
-    Serial.print(simulating);
+    Serial.print(_simulating);
     Serial.print(" Stop Fans: ");
-    Serial.println(stopFans);
+    Serial.print(_stopFans);
+    Serial.print(" Auto Fans: ");
+    Serial.print(_autoFans);
+    Serial.print(" Using Wifi?: ");
+    Serial.println(usingwifi);
     
 }
 
@@ -151,7 +159,8 @@ void cliSpeedCallback(cmd* cmdPtr) {
         int speed = speedString.toInt();
         if(speed >= 0 && speed < 256)
         {
-            turn(fanController.getDirection(), speed);
+            //turn(fanController.getDirection(), speed);
+            _speed = speed;
         }
     }
 }
@@ -166,7 +175,8 @@ void cliDirectionCallback(cmd* cmdPtr) {
         int direction          = directionString.toInt();
         if(direction >= 0 && direction < 3)
         {
-            turn((BTS7960::Direction) direction, fanController.getPwmValue());
+            //turn((BTS7960::Direction) direction, fanController.getPwmValue());
+            _direction = direction;
         }
     }
 }
@@ -181,7 +191,7 @@ void cliSimulationCallback(cmd* cmdPtr) {
         int simulate          = simulateString.toInt(); 
         if(simulate >= 0 && simulate < 2)
         {
-            simulating = simulate;
+            _simulating = simulate;
         }
     }
 }
@@ -195,7 +205,21 @@ void clistopFansCallback(cmd* cmdPtr) {
         int fanStop          = stopFansString.toInt(); 
         if(fanStop >= 0 && fanStop < 2)
         {
-            stopFans = fanStop;
+            _stopFans = fanStop;
+        }
+    }
+}
+void cliautoFansCallback(cmd* cmdPtr) {
+    Command cmd(cmdPtr);
+
+    Argument argSimulation   = cmd.getArgument("value");
+    if(argSimulation.isSet())
+    {
+        String autoFansString = argSimulation.getValue();
+        int autoFan          = autoFansString.toInt(); 
+        if(autoFan >= 0 && autoFan < 2)
+        {
+            _autoFans = autoFan;
         }
     }
 }
@@ -234,7 +258,7 @@ void oscReply(const String &remoteAddress)
     Serial.print(remoteAddress);
     Serial.println(" Reply");
     usingwifi = true;
-    statusinfo();
+    //statusinfo();
     WifilastMessage = millis();
     //OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/speed/state", (int)fanController.getPwmValue());
     //OscWiFi.send(remoteAddress.c_str(), OSC_SEND_PORT, "/fan/direction/state", (int)fanController.getDirection());
@@ -248,7 +272,8 @@ void oscSpeedCallback(const OscMessage& m)
         int val = m.arg<int>(0);
         if(val >= 0 && val < 256)
         {
-            turn(fanController.getDirection(), val);
+            //turn(fanController.getDirection(), val);
+            _speed = val;
         }
         oscReply(m.remoteIP());   
     }
@@ -261,7 +286,8 @@ void oscDirectionCallback(const OscMessage& m)
         int val = m.arg<int>(0);
         if(val >= 0 && val < 3)
         {
-            turn((BTS7960::Direction)val, fanController.getPwmValue());
+            //turn((BTS7960::Direction)val, fanController.getPwmValue());
+            _direction = val;
         }
         oscReply(m.remoteIP());
     }
@@ -273,7 +299,7 @@ void oscSimulationCallback(const OscMessage& m)
         int val = m.arg<int>(0);
         if(val >= 0 && val < 2)
         {
-            simulating = val;
+            _simulating = val;
         }
         oscReply(m.remoteIP());
     }
@@ -285,7 +311,20 @@ void oscStopFansCallback(const OscMessage& m)
         int val = m.arg<int>(0);
         if(val >= 0 && val < 2)
         {
-            stopFans = val;
+            _stopFans = val;
+        }
+        oscReply(m.remoteIP());
+    }
+}
+
+void oscAutoFansCallback(const OscMessage& m)
+{
+    if(m.isInt32(0))
+    {
+        int val = m.arg<int>(0);
+        if(val >= 0 && val < 2)
+        {
+            _autoFans = val;
         }
         oscReply(m.remoteIP());
     }
@@ -297,6 +336,7 @@ void osc_setup()
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/direction/set", oscDirectionCallback);
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/simulate/set", oscSimulationCallback);
     OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/stopFans/set", oscStopFansCallback);
+    OscWiFi.subscribe(OSC_LISTENER_PORT, "/fan/autoFans/set", oscAutoFansCallback);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////BT/////////////////////////////////////////////////////////////////////////////////////////////
@@ -362,24 +402,38 @@ void onWrite(BLECharacteristic* pCharacteristic) {
         case 0x01: { // Control message: speed, direction, etc.
             BTlastMessage = millis();
             //Serial.println("Recieved fancontrol message");
-            if (len != 17) { // 1 byte for type + 4 x 4-byte ints = 17
+            if (len != 21) { // 1 byte for type + 4 x 4-byte ints = 17
                 Serial.println("Invalid control message length.");
                 return;
             }
-
+            Serial.println("Valid control message length.");
             int BTspeed, BTdirection;
             memcpy(&BTspeed, &data[1], 4);
-            memcpy(&stopFans, &data[5], 4);
+            memcpy(&_stopFans, &data[5], 4);
             memcpy(&BTdirection, &data[9], 4);
-            memcpy(&simulating, &data[13], 4);
-
+            memcpy(&_simulating, &data[13], 4);
+            memcpy(&_autoFans, &data[17], 4);
+            Serial.println("----- Parsed BLE Data -----");
+            Serial.print("BTspeed     : "); Serial.println(BTspeed);
+            Serial.print("_stopFans   : "); Serial.println(_stopFans);
+            Serial.print("BTdirection : "); Serial.println(BTdirection);
+            Serial.print("_simulating : "); Serial.println(_simulating);
+            Serial.print("_autoFans   : "); Serial.println(_autoFans);
+            Serial.println("Raw BLE payload:");
+            for (int i = 0; i < len; ++i) {
+                Serial.printf("[%02d] 0x%02X\n", i, data[i]);
+            }
+            Serial.println("---------------------------");
             if (BTspeed >= 0 && BTspeed < 256) {
-                turn(fanController.getDirection(), BTspeed);
+                //turn(fanController.getDirection(), BTspeed);
+                _speed = BTspeed;
+                
             }
             if (BTdirection >= 0 && BTdirection < 3) {
-                turn((BTS7960::Direction)BTdirection, fanController.getPwmValue());
+                //turn((BTS7960::Direction)BTdirection, fanController.getPwmValue());
+                _direction = BTdirection;
             }
-            statusinfo();
+            //statusinfo();
             break;
         }
 
@@ -428,7 +482,8 @@ void onWrite(BLECharacteristic* pCharacteristic) {
                 WiFi.disconnect(true); // Clear saved credentials
                 pServer->disconnect(connectedClientId);
                 Serial.println("Disconnected!");
-                reconnectCallback();                //calls BTsetup TODO
+                delay(5000);
+                ESP.restart();
             }
             
             
@@ -548,7 +603,6 @@ void BTloop()
 ////////////////////////////////////////////////////////////////////////////////////General/////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
-    reconnectCallback = BTsetup;
     Serial.begin(9600);
 
     drd = new DoubleResetDetector(DRD_TIMEOUT, DRD_ADDRESS);
@@ -581,9 +635,13 @@ float sinusCurveforSimulating(float y){
     return x;
 }
 void checkLastResponse(){
-    if(WifilastMessage < (millis()-4000) && BTlastMessage < (millis()-4000)){
-        simulating = true;
-        stopFans = false;
+    if(WifilastMessage < (millis()-10000) && BTlastMessage < (millis()-10000)){
+        if(_autoFans){
+            _simulating = true;
+            _stopFans = false;
+        }else{
+            _speed = 0;
+        }
         if(WifilastMessage > BTlastMessage){
             lastResponse = WifilastMessage;
         }else{
@@ -595,13 +653,13 @@ void checkLastResponse(){
     }
 }
 void checkstopFans(){
-    if(stopFans){
+    if(_stopFans){
         turn((BTS7960::Direction)1, 0);
     }
     
 }
 void checkSimulating(){
-    if (simulating && !stopFans)
+    if (_simulating && !_stopFans)
     {
         float result;
         float adjusted;
@@ -631,8 +689,35 @@ void checkSimulating(){
         Serial.println(remap);*/
 
         delay(150);                             // plus the 100 delay from loop = 250 aka 0.25s
-        statusinfo();
+        //statusinfo();
     }
+}
+void SendtoFan() {
+    if(!_stopFans && !_simulating){
+        turn((BTS7960::Direction)_direction, _speed);
+    }else if (_simulating && !_stopFans ){
+        float result;
+        float adjusted;
+        float remap;
+        ++counter;
+        adjusted = counter%((int)(PI*200));
+        if (adjusted != 0){
+            adjusted = adjusted/100;
+        }
+        result = sinusCurveforSimulating(adjusted);
+        if(result < 0.5){
+            result = 0.5;
+        }
+        result = result*100;
+        
+        remap = map(result, 50,70,0,255);
+        _speed = remap;
+        turn((BTS7960::Direction)1, remap);
+        //delay(150);
+    }else if(_stopFans){
+        turn((BTS7960::Direction)1, 0);
+    }
+    
 }
 
 void loop() {
@@ -649,7 +734,9 @@ void loop() {
     #endif
     
     checkLastResponse();
-    checkSimulating();
-    checkstopFans();
-    delay(100);
+    SendtoFan();
+    statusinfo();
+    //checkSimulating();
+    //checkstopFans();
+    delay(1000);
 }
