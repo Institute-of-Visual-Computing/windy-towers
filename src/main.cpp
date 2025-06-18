@@ -32,9 +32,9 @@ Command cmdSimulate;
 Command cmdstopFans;
 int _speed = 0;
 int _direction = 0;
-bool _simulating = true;
-bool _stopFans = true;
-bool _autoFans = true;
+int _simulating = true;
+int _stopFans = true;
+int _autoFans = true;
 bool usingwifi = false;
 bool usingbt = true;
 int counter = 0;
@@ -67,9 +67,11 @@ void statusinfo(){
     
     Serial.print(" Direction: ");
     //Serial.print((int) fanController.getDirection());
+    //Serial.print(" : ");
     Serial.print(_direction);
     Serial.print(" Speed: ");
     //Serial.print(fanController.getPwmValue());
+    //Serial.print(" : ");
     Serial.print(_speed);
     Serial.print(" Simulate: ");
     Serial.print(_simulating);
@@ -108,7 +110,7 @@ void wifi_setup() {
 
     // Wait up to 10 seconds for connection
     int attempts = 0;
-    const int maxAttempts = 200; // 100 x 100ms = 10 seconds
+    const int maxAttempts = 100; // 100 x 100ms = 10 seconds
     while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
         delay(100);
         Serial.print(".");
@@ -159,7 +161,7 @@ void cliSpeedCallback(cmd* cmdPtr) {
         int speed = speedString.toInt();
         if(speed >= 0 && speed < 256)
         {
-            //turn(fanController.getDirection(), speed);
+            turn(fanController.getDirection(), speed);
             _speed = speed;
         }
     }
@@ -175,7 +177,7 @@ void cliDirectionCallback(cmd* cmdPtr) {
         int direction          = directionString.toInt();
         if(direction >= 0 && direction < 3)
         {
-            //turn((BTS7960::Direction) direction, fanController.getPwmValue());
+            turn((BTS7960::Direction) direction, fanController.getPwmValue());
             _direction = direction;
         }
     }
@@ -198,10 +200,10 @@ void cliSimulationCallback(cmd* cmdPtr) {
 void clistopFansCallback(cmd* cmdPtr) {
     Command cmd(cmdPtr);
 
-    Argument argSimulation   = cmd.getArgument("value");
-    if(argSimulation.isSet())
+    Argument argstopFans   = cmd.getArgument("value");
+    if(argstopFans.isSet())
     {
-        String stopFansString = argSimulation.getValue();
+        String stopFansString = argstopFans.getValue();
         int fanStop          = stopFansString.toInt(); 
         if(fanStop >= 0 && fanStop < 2)
         {
@@ -212,10 +214,10 @@ void clistopFansCallback(cmd* cmdPtr) {
 void cliautoFansCallback(cmd* cmdPtr) {
     Command cmd(cmdPtr);
 
-    Argument argSimulation   = cmd.getArgument("value");
-    if(argSimulation.isSet())
+    Argument argAutoFans   = cmd.getArgument("value");
+    if(argAutoFans.isSet())
     {
-        String autoFansString = argSimulation.getValue();
+        String autoFansString = argAutoFans.getValue();
         int autoFan          = autoFansString.toInt(); 
         if(autoFan >= 0 && autoFan < 2)
         {
@@ -406,24 +408,24 @@ void onWrite(BLECharacteristic* pCharacteristic) {
                 Serial.println("Invalid control message length.");
                 return;
             }
-            Serial.println("Valid control message length.");
+            //Serial.println("Valid control message length.");
             int BTspeed, BTdirection;
             memcpy(&BTspeed, &data[1], 4);
             memcpy(&_stopFans, &data[5], 4);
             memcpy(&BTdirection, &data[9], 4);
             memcpy(&_simulating, &data[13], 4);
             memcpy(&_autoFans, &data[17], 4);
-            Serial.println("----- Parsed BLE Data -----");
+            /*Serial.println("----- Parsed BLE Data -----");
             Serial.print("BTspeed     : "); Serial.println(BTspeed);
             Serial.print("_stopFans   : "); Serial.println(_stopFans);
             Serial.print("BTdirection : "); Serial.println(BTdirection);
             Serial.print("_simulating : "); Serial.println(_simulating);
             Serial.print("_autoFans   : "); Serial.println(_autoFans);
-            Serial.println("Raw BLE payload:");
-            for (int i = 0; i < len; ++i) {
+            Serial.println("Raw BLE payload:");*/
+            /*for (int i = 0; i < len; ++i) {
                 Serial.printf("[%02d] 0x%02X\n", i, data[i]);
             }
-            Serial.println("---------------------------");
+            Serial.println("---------------------------");*/
             if (BTspeed >= 0 && BTspeed < 256) {
                 //turn(fanController.getDirection(), BTspeed);
                 _speed = BTspeed;
@@ -603,7 +605,7 @@ void BTloop()
 ////////////////////////////////////////////////////////////////////////////////////General/////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
 
     drd = new DoubleResetDetector(DRD_TIMEOUT, DRD_ADDRESS);
     if (drd->detectDoubleReset()) 
@@ -618,11 +620,11 @@ void setup() {
     //pinMode(A_IN_RPWM, INPUT_PULLDOWN);
     Serial.println("I am " + hostName);
     cli_setup();
-    BTsetup();
     #ifdef USE_WIFI
       wifi_setup();
       osc_setup();
     #endif
+    BTsetup();
     
     Serial.println("Setup done");
     lastMillis = millis();
@@ -716,6 +718,7 @@ void SendtoFan() {
         //delay(150);
     }else if(_stopFans){
         turn((BTS7960::Direction)1, 0);
+        _speed = 0;
     }
     
 }
